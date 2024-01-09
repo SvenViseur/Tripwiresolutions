@@ -1,0 +1,70 @@
+--CREATE RESTORE POINT upgrade_JIRA_TICKET;
+
+SET DEFINE ON;
+SET HEADING OFF;
+SET TIMING OFF;
+SET TIME OFF;
+SET FEEDBACK OFF;
+SET ECHO OFF;
+SET TRIMSPOOL ON;
+SET PAGESIZE 0;
+
+ALTER SESSION SET SQL_TRACE=FALSE;
+ALTER SESSION SET NLS_LENGTH_SEMANTICS = CHAR ;
+ALTER SESSION SET NLS_TERRITORY = BELGIUM;
+ALTER SESSION SET OPTIMIZER_ADAPTIVE_PLANS=FALSE;
+
+WHENEVER OSERROR EXIT FAILURE
+WHENEVER SQLERROR EXIT SQL.SQLCODE
+
+VARIABLE spoolfile VARCHAR2(100 CHAR);
+VARIABLE database VARCHAR2(100);
+VARIABLE instance VARCHAR2(100);
+VARIABLE sessionuser VARCHAR2(100);
+VARIABLE isdba VARCHAR2(100);
+VARIABLE osuser VARCHAR2(100);
+VARIABLE time VARCHAR2(100);
+
+ALTER SESSION SET NLS_DATE_FORMAT = 'YYYYMMDD-HH24MISS';
+
+BEGIN
+  SELECT name INTO :database FROM v$database;
+  SELECT sys_context('USERENV','DB_NAME') INTO :instance FROM dual;
+  SELECT sys_context('USERENV','SESSION_USER') INTO :sessionuser FROM dual;
+  SELECT sys_context('USERENV','OS_USER') INTO :osuser FROM dual;
+  SELECT sys_context('USERENV','ISDBA') INTO :isdba FROM dual;
+  SELECT sysdate INTO :time FROM dual;
+
+END;
+/
+
+column spfl new_value spool_time noprint
+select '_'||sys_context('USERENV','DB_NAME')||'_'||to_char(sysdate, 'YYYYMMDDHH24MISS') spfl from dual ;
+
+SPOOL upgrade_JIRA_TICKET&spool_time
+
+SELECT '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$' FROM dual;
+SELECT 'Current database   : ' || :database FROM dual;
+SELECT 'Current instance   : ' || :instance FROM dual;
+SELECT 'Current user       : ' || :sessionuser FROM dual;
+SELECT 'Is DBA?            : ' || :isdba FROM dual;
+SELECT 'OS user            : ' || :osuser FROM dual;
+SELECT 'Current time       : ' || :time FROM dual;
+SELECT '$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$' FROM dual;
+
+SET DEFINE ON;
+SET HEADING ON;
+SET TIMING ON;
+SET TIME ON;
+SET TIMING ON;
+SET FEEDBACK ON;
+SET SERVEROUTPUT ON SIZE UNLIMITED;
+SET ECHO OFF;
+SET SQLBLANKLINES ON;
+SET TRIMSPOOL ON;
+
+----------------------------------------------------
+---- Start Migration Scripts
+----------------------------------------------------
+column tm new_value run_time noprint
+
