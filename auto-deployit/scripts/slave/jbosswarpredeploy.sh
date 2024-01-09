@@ -1,0 +1,254 @@
+#!/bin/bash
+
+#### jbosswarpredeploy.sh script
+# This script is to be run from a Jenkins AutoDeploy job.
+#
+# Command line options:
+#     APPL		: The ADC name being deployed
+#     TICKETNR		: The ticket number being deployed
+#     ENV		: The target environment
+#
+#################################################################
+# Change history
+#################################################################
+# dexa # dec/2015    # initial POC versie
+# dexa # apr/2016    # move naar deploy-it ACC omgeving
+#      #             # centraliseer functies in externe file
+# dexa # sept/2016   # ArgDoel en bijbehorende processing
+# dexa # sept/2016   # Toev check ArgAppl vs DerivedADC
+# dexa # 05/12/2016  # gebruik /tmp vervangen door call naar
+#      #             # MaakTmpTicketFolder
+# dexa # 24/01/2017  # insert call naar GetDynOplOmg
+# dexa # 29/05/2017  # upload deployit-scripts voor delete
+#      #             #   ONDERSTEUN-1302
+# lekri # 12/11/2021 # ondersteuning ACC & SIM TraceIT/4me
+#      #             #
+#      #             #
+#      #             #
+#################################################################
+#
+
+ScriptName="jbosswarpredeploy.sh"
+ScriptPath="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+source "${ScriptPath}/deploy_initial_settings.sh"
+source "${ScriptPath}/deploy_global_settings.sh"
+source "${ScriptPath}/deploy_global_functions.sh"
+source "${ScriptPath}/deploy_replace_tool.sh"
+source "${ScriptPath}/deploy_specific_settings.sh"
+source "${ScriptPath}/deploy_errorwarns.sh"
+
+ArgAppl=$1
+ArgTicketNr=$2
+ArgEnv=$3
+ArgDoel=$4
+ArgExtraOpts=$5
+
+echo "Script" ${ScriptName}  "started."
+echo "Options are:"
+echo "  APPL = '${ArgAppl}'"
+echo "  TICKETNR = '${ArgTicketNr}'"
+echo "  ENV = '${ArgEnv}'"
+echo "  DOEL = '${ArgDoel}'"
+
+## GetEnvData:
+##     input variables  : $ArgEnv
+GetEnvData
+
+SshCommand="SSH_to_appl_srv"
+ScpPutCommand="SCP_to_appl_srv"
+SSHTargetUser=$UnixUserOnApplSrv
+
+ActionType="war-predeploy"
+MaakTmpTicketFolder
+cd ${TmpTicketFolder}
+
+TmpFld=$TmpTicketFolder
+TheEnv=$ArgEnv
+TheADC=$ArgAppl
+
+## Get default settings based on the ENV and ADC
+GetDeployITSettings
+
+## ExtraOpts is hier nodig, omdat GetDynOplOmg via TraceIT gebeurt
+Parse_ExtraOptsSvnTraceIT "$ArgExtraOpts"
+
+## GetDynOplOmg:
+## In: ArgTicketNr, TmpFld    Out: TheOpl
+GetDynOplOmg
+
+DebugLevel=$DeployIT_Debug_Level
+Replace_Tool_Defaults
+EchoDeployITSettings
+LoggingBaseFolder="${ConfigNfsFolderRepllogOnServer}/target_${ArgEnv}/"
+mkdir -p $LoggingBaseFolder
+
+StapDoelBepalen $ArgDoel
+
+## Opnieuw ExtraOpts parsen, want die kunnen StapDoel wijzigen!
+Parse_ExtraOptsSvnTraceIT "$ArgExtraOpts"
+
+if [ $DeployIT_Stap_Doel -lt $DEPLOYIT_STAP_PREDEPLOY ]; then
+  echo "WARN: Predeploy fase naar target servers niet uitgevoerd wegens huidig doel"
+  exit 0
+fi
+
+## Get info on container
+GetCntInfo
+## Output: $TheCnt, $TheUsr, $TheFld
+
+## GetSrvList:
+##     input variables  : $ArgAppl, $ArgEnv
+##     input files      : ADCENV2SRV.csv
+GetSrvList
+##     output variables : $SrvCount, $SrvList[1..$SrvCount]
+
+if [ "$SrvCount" = "0" ]; then
+  deploy_error $DPLERR_ServerCount0
+fi
+
+## Toon de lijst van servers in SrvList[]
+EchoSrvList
+
+## Doe een PING naar alle servers in SrvList[]
+PingSrvList
+
+## Maak locale folder klaar voor downloads
+## Clean up local traces of previous runs of this same ticket
+rm -rf ${TmpTicketFolder}
+mkdir  ${TmpTicketFolder}
+cd ${TmpTicketFolder}
+
+## Download ticket materiaal
+Handover_Download_Local
+
+# Check the contents of the deleted and downloaded files
+HandoverDeletedList="${TmpTicketFolder}/TI${ArgTicketNr}-deleted.txt"
+HandoverDownloadedList="${TmpTicketFolder}/TI${ArgTicketNr}-downloaded.txt"
+
+OnlyDeletes=0 ## Default value
+
+# Check the contents of the deleted and downloaded files
+# Test 1: ensure deleted.txt AND downloaded.txt are NOT BOTH empty
+if [ ! -s ${HandoverDownloadedList} ]; then
+  if [ ! -s ${HandoverDeletedList} ]; then
+    echo "ERROR: Ticket bevat geen data files (geen nieuwe, gewijzigde of verwijderde files). DeployIT kan dus niets doen."
+  fi
+  ## Als we dit punt bereiken, dan is er GEEN downloaded file maar wel deleted files.
+  ## Dus heeft het geen zin om de downloaded file te parsen.
+  OnlyDeletes=1
+fi
+
+line1=$(cat ${HandoverDownloadedList} ${HandoverDeletedList} | head -n 1)
+echo "line1 = " ${line1}
+## expected format: OK      <adc-folder>/...
+## remove the "OK" + tab section
+line1=${line1:3}
+echo "line1 (stripped) = " ${line1}
+firstpart=${line1%%"/"*}
+
+DerivedADC=${firstpart^^}
+## Compare the requested ADC with the one derived from the HODL file
+if [ "$ArgAppl" = "$DerivedADC" ]; then
+  LogLineINFO "De ADC van het ticket komt overeen met de ADC van deze Jenkins job."
+else
+  echo "ERROR: Dit ticket bevat files die, op basis van hun locatie, niet tot deze ADC behoren. Deploy kan niet verdergaan."
+  echo "Deploy voor ADC=${ArgAppl}. Files in ticket zouden zijn voor ADC=${DerivedADC}."
+  exit 16
+fi
+
+## Currently, we only support to deploy the config files that were generated by our own tools
+ToInstallSubfolder="${TmpTicketFolder}/${firstpart}"
+
+## Copieer de bestanden die moeten geinstalleerd worden naar de NFS mount.
+NfsFolder="${ConfigNfsFolderOnServer}/T${ArgTicketNr}"
+rm -rf $NfsFolder
+if [ -d ${NfsFolder} ]; then
+  echo "ERROR: Could not remove old contents in ${NfsFolder}."
+  exit 16
+fi
+mkdir $NfsFolder
+if [ ! -d ${NfsFolder} ]; then
+  echo "ERROR: Could not create directory ${NfsFolder}."
+  exit 16
+fi
+echo "Copying files and folders from ${ToInstallSubfolder} to ${NfsFolder}."
+cp -a ${ToInstallSubfolder}/* ${NfsFolder}
+RC=$?
+if [ $RC -ne 0 ]; then
+  echo "Could not copy material to the NFS share. Please check the mounts on this server."
+  exit 16
+fi
+if [ -s ${HandoverDeletedList} ];
+then
+  ## Er zijn delete requests die we moeten afhandelen op de target servers.
+  cd ${TmpTicketFolder}
+  Handover_MakeDeleteBashScript
+  mkdir -p "${NfsFolder}/deployIT-scripts"
+  cp "TI${ArgTicketNr}-dodelete.sh" "${NfsFolder}/deployIT-scripts/dodelete.sh"
+fi
+chown -R ${UnixUserSlave}:${UnixGroupPckSlv} ${NfsFolder}/*
+
+## At this point, we must have something in the NfsFolder:
+## Either data files (if downloaded), or a delete script (if deleted)
+## or both.
+
+TargetFolder="${TheFld}/deploy_material/war"
+# prepare script to send to target server(s)
+TmpCmdFile="${TmpTicketFolder}/preptargetfolder.sh"
+rm $TmpCmdFile
+cat >${TmpCmdFile} << EOL
+#!/bin/bash
+mkdir -p ${TargetFolder}
+RC=\$?
+if [ \$RC -ne 0 ]; then
+  echo "Could not create the ticket specific folder."
+  exit 16
+fi
+cd ${TargetFolder}
+rm -rf from_nfs
+mkdir from_nfs
+cp -a ${ConfigNfsFolderOnClient}/T${ArgTicketNr}/* from_nfs
+RC=\$?
+if [ \$RC -ne 0 ]; then
+  echo "Could not copy the ticket specific files into a temporary deploy folder."
+  exit 16
+fi
+chown -R :jboss from_nfs
+RC=\$?
+if [ \$RC -ne 0 ]; then
+  echo "Could not set group ownership for the ticket specific files."
+  exit 16
+fi
+EOL
+chmod +x ${TmpCmdFile}
+
+echo "Starting communication with target servers ..."
+
+for (( i=1 ; i<=$(( $SrvCount )); i++))
+  do
+    TargetServer="${SrvList[$i]}${DnsSuffix}"
+    echo "Starting preparation work on server ${TargetServer}"
+
+    $ScpPutCommand $TargetServer $TmpCmdFile "/tmp/T${ArgTicketNr}_preparetargetfolder.sh"
+    RC=$?
+    if [ $RC -ne 0 ]; then
+      deploy_error $DPLERR_ScpPutFailed "preparetargetfolder.sh" $TargetServer
+    fi
+
+    # execute the preparetargetfolder.sh script
+    $SshCommand $TargetServer "source /tmp/T${ArgTicketNr}_preparetargetfolder.sh"
+    RC=$?
+    if [ $RC -ne 0 ]; then
+      deploy_error $DPLERR_SshExecFailed "preparetargetfolder.sh" $TargetServer $RC
+    fi
+
+  done
+# All listed target servers have now been provisioned with the svn material.
+
+### Clean up tmp files
+if [ ${DeployIT_Keep_Temporary_Files} -ne 1 ]; then
+  rm -rf ${TmpTicketFolder}
+fi
+
+echo "Script" ${ScriptName}  "ended."
