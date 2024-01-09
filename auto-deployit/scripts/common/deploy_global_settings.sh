@@ -1,0 +1,6 @@
+SshScriptsFolder="/data/deploy-it/scripts/ssh"
+DnsSuffix=""
+UnixUserPackager="tacccomp"
+SvnCommonOpts="--no-auth-cache --non-interactive --trust-server-cert"
+SSHDefaultOpts="-t -t -o StrictHostKeyChecking=no"
+SCPDefaultOpts="-o StrictHostKeyChecking=no -p -r"
