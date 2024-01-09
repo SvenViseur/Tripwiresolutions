@@ -1,0 +1,6 @@
+PREBUILD_INFO="System Team"
+PREBUILD_DESCRIPTION="System Team Related Tickets"
+PREBUILD_JIRA_JQL="issuetype%20in%20(%22Story%22%2C%22Bug%22%2C%22Enabler%22%2C%22Maintenance%22%2C%22Task%22%2C%22Sub-task%22%2C%22Problem%22%2C%22Test%20Defect%22)%20AND%20Fixversion%3D%20%22Send%20Request%20to%20Build%20via%20Jenkins%22%20AND%20Repository%20%3D%20%22EST%22"
+PREBUILD_TARGET_SUBVERSION=${N_WORKSPACE}"/civl_jenkins_release"
+PREBUILD_GROOVY=civl_jira_build.groovy
+PREBUILD_TEAM="System Team"

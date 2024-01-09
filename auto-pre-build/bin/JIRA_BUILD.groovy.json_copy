@@ -1,0 +1,111 @@
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+import groovy.util.CliBuilder
+import org.apache.commons.cli.*
+import java.util.*
+import java.text.*
+
+def cli = new CliBuilder(usage: 'applyDeployArchives.groovy ')
+cli.with{
+        h longOpt: 'help', 'Show usage information'
+        f longOpt: 'filename', args:1, required: true, 'Name of the json file'
+        o longOpt: 'out_filename', args:1, required: true, 'Name of the json file'
+
+}
+
+def options = cli.parse(args)
+
+if(!options){
+        return
+}
+
+if(options.h){
+        cli.usage()
+        return
+}
+ 
+filename = options.filename
+ 
+def fileContents = new File(filename).getText('UTF-8')
+
+//def json = new JsonSlurper().parse(new FileReader(filename))
+def json = new JsonSlurper().parseText(fileContents)
+
+// Parse and get the correct key/value from the json input file
+
+def pOmgeving
+def pKey
+def pURL
+def pTeam
+def pSummary
+def pAssignee
+def pProject
+def pSource
+
+pOmgeving = json.issues.fields.customfield_10068.value[0]
+pKey = json.issues.key[0] 
+pURL = json.issues.self[0]
+pTeam = json.issues.fields.project.key[0] 
+pSummary = json.issues.fields.summary[0]
+pAssignee = json.issues.fields.assignee.name[0] 
+pProject = json.issues.fields.project.projectCategory.name[0] 
+pSource = "DEV"
+
+pDDL = json.issues.fields.customfield_10057[0]
+pODI = json.issues.fields.customfield_10056[0]
+
+
+//def schoolInfo= json.issues
+//schoolInfo.each{
+//    def prt = it."fields"
+//    prt.each {
+//        println it.key
+//        println it.value
+//}
+//}
+
+// Build the json file
+
+
+println pOmgeving
+println pKey
+println pURL
+println pTeam
+println pSummary
+println pAssignee
+println pProject
+println pSource
+
+println pDDL
+println pODI
+
+def jsonBuilder = new groovy.json.JsonBuilder()
+jsonBuilder.BuildRelease(
+Omgeving: pOmgeving ,
+TicketID: pKey,
+URL: pURL,
+Team: pTeam,
+Summary: pSummary,
+Assignee: pAssignee,
+Project: pProject,
+Source: pSource,
+DDL_List: pDDL,
+ODI_List: pODI,
+Stop_Env: 'N',
+TIProject: '--',
+TIRelease: '--',
+ADC: pOmgeving ,
+AutoDeployACC : 'N',
+Successor : '---',
+Predecessor : '---',
+)
+
+def jsonout = JsonOutput.toJson(jsonBuilder)
+new File(options.o).write(jsonout)
+
+println("Using just named arguments")
+println(jsonBuilder.toPrettyString())
+
+println("Script terminated")
+
