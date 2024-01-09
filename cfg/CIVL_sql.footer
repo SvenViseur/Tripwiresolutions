@@ -1,0 +1,38 @@
+
+
+--------------------------------------------------
+-- STANDAARD POST INSTALLATIE ELEMENTEN
+--------------------------------------------------
+-- POST CHECK: unprefixed objects
+
+WHENEVER OSERROR EXIT FAILURE
+WHENEVER SQLERROR EXIT SQL.SQLCODE
+
+/
+
+DECLARE v_objects NUMBER;
+BEGIN
+    v_objects:=0;
+    select count(1) into v_objects
+    from all_objects where owner = 'CRUD_AUTODEPLOY';
+    if v_objects > 0
+    then
+        raise_application_error(
+                -20004,
+                'objects with unprefixed schema name used in script'
+            );
+    end if;
+END;
+
+/
+
+select to_char(sysdate, 'YYYYMMDD HH24:MI:SS') tm from dual ;
+prompt ====================================================
+prompt ==> End &run_time
+prompt ==> Final End of DDL script
+prompt ====================================================
+
+spool off
+
+exit
+
